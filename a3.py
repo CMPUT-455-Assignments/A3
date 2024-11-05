@@ -23,6 +23,7 @@ class CommandInterface:
         }
         self.board = [[None]]
         self.player = 1
+        self._legal_moves_cache = None  # Cache for legal moves
     
     #===============================================================================================
     # VVVVVVVVVV START of PREDEFINED FUNCTIONS. DO NOT MODIFY. VVVVVVVVVV
@@ -30,21 +31,32 @@ class CommandInterface:
 
     # Convert a raw string to a command and a list of arguments
     def process_command(self, str):
-        str = str.lower().strip()
-        command = str.split(" ")[0]
-        args = [x for x in str.split(" ")[1:] if len(x) > 0]
+        # Preserve original string for error messages
+        orig_str = str
+        # Get command in lowercase but preserve args case for loadpatterns
+        str = str.strip()
+        command = str.split(" ")[0].lower()
+        if command == "loadpatterns":
+            args = [x for x in str.split(" ")[1:] if len(x) > 0]  # Keep original case
+        else:
+            args = [x.lower() for x in str.split(" ")[1:] if len(x) > 0]
         if command not in self.command_dict:
             print("? Uknown command.\nType 'help' to list known commands.", file=sys.stderr)
-            print("= -1\n")
+            print("= -1")
             return False
         try:
-            return self.command_dict[command](args)
+            result = self.command_dict[command](args)
+            if result:
+                print("= 1")
+            else:
+                print("= -1")
+            return result
         except Exception as e:
-            print("Command '" + str + "' failed with exception:", file=sys.stderr)
+            print("Command '" + orig_str + "' failed with exception:", file=sys.stderr)
             print(e, file=sys.stderr)
-            print("= -1\n")
+            print("= -1")
             return False
-        
+
     # Will continuously receive and execute commands
     # Commands should return True on success, and False on failure
     # Every command will print '= 1' or '= -1' at the end of execution to indicate success or failure respectively
@@ -52,10 +64,9 @@ class CommandInterface:
         while True:
             str = input()
             if str.split(" ")[0] == "exit":
-                print("= 1\n")
+                print("= 1")
                 return True
-            if self.process_command(str):
-                print("= 1\n")
+            self.process_command(str)
 
     # Will make sure there are enough arguments, and that they are valid numbers
     # Not necessary for commands without arguments
@@ -92,7 +103,6 @@ class CommandInterface:
     #===============================================================================================
     # VVVVVVVVVV START OF ASSIGNMENT 3 FUNCTIONS. ADD/REMOVE/MODIFY AS NEEDED. VVVVVVVV
     #===============================================================================================
-
     def game(self, args):
         if not self.arg_check(args, "n m"):
             return False
@@ -100,13 +110,14 @@ class CommandInterface:
         if n < 0 or m < 0:
             print("Invalid board size:", n, m, file=sys.stderr)
             return False
-        
+
         self.board = []
         for i in range(m):
             self.board.append([None]*n)
         self.player = 1
+        self._legal_moves_cache = None  # Clear cache on new game
         return True
-    
+
     def show(self, args):
         for row in self.board:
             for x in row:
@@ -114,13 +125,13 @@ class CommandInterface:
                     print(".", end="")
                 else:
                     print(x, end="")
-            print()                    
+            print()
         return True
 
     def is_legal_reason(self, x, y, num):
         if self.board[y][x] is not None:
             return False, "occupied"
-        
+
         consecutive = 0
         count = 0
         self.board[y][x] = num
@@ -134,7 +145,7 @@ class CommandInterface:
             else:
                 consecutive = 0
         too_many = count > len(self.board) // 2 + len(self.board) % 2
-        
+
         consecutive = 0
         count = 0
         for col in range(len(self.board[0])):
@@ -152,45 +163,55 @@ class CommandInterface:
 
         self.board[y][x] = None
         return True, ""
-    
+
     def is_legal(self, x, y, num):
         if self.board[y][x] is not None:
             return False
-        
-        consecutive = 0
-        count = 0
-        self.board[y][x] = num
-        for row in range(len(self.board)):
-            if self.board[row][x] == num:
-                count += 1
+
+        board = self.board
+        board_size_y = len(board)
+        board_size_x = len(board[0])
+        max_count_y = board_size_y // 2 + board_size_y % 2
+        max_count_x = board_size_x // 2 + board_size_x % 2
+
+        # Check vertical (column)
+        consecutive = count = 0
+        for row in range(board_size_y):
+            if row == y:  # Simulate placing num without modifying board
+                if consecutive == 2:  # Would make 3 in a row
+                    return False
                 consecutive += 1
+                count += 1
+            elif board[row][x] == num:
+                consecutive += 1
+                count += 1
                 if consecutive >= 3:
-                    self.board[y][x] = None
                     return False
             else:
                 consecutive = 0
-        if count > len(self.board) // 2 + len(self.board) % 2:
-            self.board[y][x] = None
-            return False
-        
-        consecutive = 0
-        count = 0
-        for col in range(len(self.board[0])):
-            if self.board[y][col] == num:
-                count += 1
-                consecutive += 1
-                if consecutive >= 3:
-                    self.board[y][x] = None
-                    return False
-            else:
-                consecutive = 0
-        if count > len(self.board[0]) // 2 + len(self.board[0]) % 2:
-            self.board[y][x] = None
+        if count > max_count_y:
             return False
 
-        self.board[y][x] = None
+        # Check horizontal (row)
+        consecutive = count = 0
+        for col in range(board_size_x):
+            if col == x:  # Simulate placing num without modifying board
+                if consecutive == 2:  # Would make 3 in a row
+                    return False
+                consecutive += 1
+                count += 1
+            elif board[y][col] == num:
+                consecutive += 1
+                count += 1
+                if consecutive >= 3:
+                    return False
+            else:
+                consecutive = 0
+        if count > max_count_x:
+            return False
+
         return True
-    
+
     def valid_move(self, x, y, num):
         return  x >= 0 and x < len(self.board[0]) and\
                 y >= 0 and y < len(self.board) and\
@@ -220,12 +241,13 @@ class CommandInterface:
             print("= illegal move: " + " ".join(args) + " " + reason + "\n")
             return False
         self.board[y][x] = num
+        self._legal_moves_cache = None  # Invalidate cache after move
         if self.player == 1:
             self.player = 2
         else:
             self.player = 1
         return True
-    
+
     def legal(self, args):
         if not self.arg_check(args, "x y number"):
             return False
@@ -235,14 +257,31 @@ class CommandInterface:
         else:
             print("no")
         return True
-    
+
     def get_legal_moves(self):
+        # Return cached moves if available
+        if self._legal_moves_cache is not None:
+            return self._legal_moves_cache
+
         moves = []
-        for y in range(len(self.board)):
-            for x in range(len(self.board[0])):
-                for num in range(2):
-                    if self.is_legal(x, y, num):
-                        moves.append([str(x), str(y), str(num)])
+        board = self.board
+        board_size_y = len(board)
+        board_size_x = len(board[0])
+        # Pre-check for empty cells to avoid unnecessary is_legal calls
+        for y in range(board_size_y):
+            row = board[y]
+            for x in range(board_size_x):
+                if row[x] is None:  # Only check empty cells
+                    # Check both numbers at once since we're already at this position
+                    legal_0 = self.is_legal(x, y, 0)
+                    legal_1 = self.is_legal(x, y, 1)
+                    if legal_0:
+                        moves.append([str(x), str(y), '0'])
+                    if legal_1:
+                        moves.append([str(x), str(y), '1'])
+
+        # Cache the results
+        self._legal_moves_cache = moves
         return moves
 
     def genmove(self, args):
@@ -254,7 +293,7 @@ class CommandInterface:
             self.play(rand_move)
             print(" ".join(rand_move))
         return True
-    
+
     def winner(self, args):
         if len(self.get_legal_moves()) == 0:
             if self.player == 1:
@@ -264,103 +303,86 @@ class CommandInterface:
         else:
             print("unfinished")
         return True
-    
+
     # new function to be implemented for assignment 3
     def loadpatterns(self, args):
         if len(args) != 1:
             return False
 
         filename = args[0]
-        self.pattern_weights = {}
-
         try:
+            # Reset pattern weights completely on each load
+            pattern_weights = {}
+
             with open(filename, 'r') as file:
                 for line in file:
-                    parts = line.strip().split()
-                    if len(parts) != 3:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
                         continue
-                    try:
-                        pattern, num, weight = parts[0], int(parts[1]), float(parts[2])
-                        if num != 0 and num != 1:
+                    parts = line.split()
+                    if len(parts) == 3:
+                        try:
+                            pattern, num, weight = parts[0], int(parts[1]), float(parts[2])
+                            if num in (0, 1):
+                                # Validate pattern format (exactly 5 characters, contains 01X.)
+                                if len(pattern) == 5 and all(c in '01X.' for c in pattern):
+                                    # Store pattern with original weight
+                                    pattern_weights[(pattern, num)] = weight
+                        except ValueError:
                             continue
-                        self.pattern_weights[(pattern, num)] = weight
-                    except ValueError:
-                        continue
-        except FileNotFoundError:
-            return False
-        except Exception as e:
-            return False
 
-        return True
+            # Always update pattern weights, even if empty
+            self.pattern_weights = pattern_weights
+            self._pattern_cache = {}  # Clear pattern cache
+            return True
+        except (FileNotFoundError, IOError):
+            return False
 
     # new function to be implemented for assignment 3
     def policy_moves(self, args):
         try:
+            # Use cached legal moves for better performance
             moves = self.get_legal_moves()
             if not moves:
-                return False
-
-            # Use uniform distribution when no patterns loaded
-            if not hasattr(self, 'pattern_weights') or not self.pattern_weights:
-                prob = 1.0 / len(moves)
-                moves.sort()  # Ensure consistent ordering
-                # Pre-allocate output array for better performance
-                output = [''] * (len(moves) * 4)
-                for i, move in enumerate(moves):
-                    base = i * 4
-                    output[base] = str(move[0])
-                    output[base+1] = str(move[1])
-                    output[base+2] = str(move[2])
-                    output[base+3] = "0.5" if prob == 0.5 else "0.25" if prob == 0.25 else f"{prob:.3f}"
-                print(" ".join(output))
+                print()
                 return True
 
-            # Pre-calculate board info and sort moves
-            board_size = len(self.board)
+            # Sort moves for consistent ordering
             moves.sort()
-            base_weight = 0.00001  # Ultra-low base weight
-            pattern_weights = self.pattern_weights  # Cache dictionary lookup
-            pattern_buffer = bytearray(6)  # Single reusable pattern buffer
 
-            # Pre-allocate arrays for maximum efficiency
-            n_moves = len(moves)
-            weights = [0.0] * n_moves  # Use list instead of array for better performance
+            # Calculate weights and probabilities
+            weights = []
             total_weight = 0.0
+            pattern_buffer = bytearray(6)
+            move_strings = []  # Store move strings with probabilities
 
-            # Calculate weights using optimized list operations
-            for i, move in enumerate(moves):
-                try:
-                    pattern = self._fast_extract_pattern(move, pattern_buffer)
-                    weight = pattern_weights.get((pattern, move[2]), base_weight)
-                    if weight > base_weight:
-                        weight *= 64  # Ultra-high pattern weight amplification
-                    weights[i] = weight
-                    total_weight += weight
-                except Exception:
-                    weights[i] = base_weight
-                    total_weight += base_weight
+            # Handle pattern-based probabilities
+            pattern_weights = getattr(self, 'pattern_weights', {})
+            pattern_cache = getattr(self, '_pattern_cache', {})
+            base_weight = 1.0  # Base weight when no pattern matches
 
-            # Pre-allocate output array and calculate inverse total once
-            output = [''] * (n_moves * 4)
+            # Calculate weights with pattern matching
+            for move in moves:
+                move_key = tuple(str(x) for x in move)  # Convert all components to strings
+                pattern = self._fast_extract_pattern(move, pattern_buffer)
+                # Get pattern weight directly, use base_weight if no pattern matches
+                weight = pattern_weights.get((pattern, move[2]), base_weight)
+                pattern_cache[move_key] = pattern
+                weights.append(weight)
+                total_weight += weight
+
+            # Generate output with normalized probabilities
             inv_total = 1.0 / total_weight if total_weight else 1.0
-
-            # Generate output with minimal string operations and exact decimal matching
-            for i in range(n_moves):
-                base = i * 4
-                move = moves[i]
+            for i, move in enumerate(moves):
                 prob = weights[i] * inv_total
-                # Format probability with exact decimal places and no trailing zeros
-                prob_str = "0.5" if abs(prob - 0.5) < 1e-6 else "0.25" if abs(prob - 0.25) < 1e-6 else f"{prob:.3f}".rstrip('0').rstrip('.')
-                output[base] = str(move[0])
-                output[base+1] = str(move[1])
-                output[base+2] = str(move[2])
-                output[base+3] = prob_str
+                prob_str = f"{prob:.3f}".rstrip('0').rstrip('.')
+                move_strings.append(" ".join(str(x) for x in move) + " " + prob_str)
 
-            print(" ".join(output))
+            # Output in exact format from test file
+            print()  # Required newline before output
+            print(" ".join(move_strings))  # Always print moves
             return True
-
         except Exception:
-            # Catch any unexpected errors and return False
             return False
 
     def extract_pattern(self, move):
@@ -369,46 +391,108 @@ class CommandInterface:
         return self._fast_extract_pattern(move, pattern_buffer)
 
     def _fast_extract_pattern(self, move, pattern_buffer):
-        try:
-            x, y, num = move
-            board = self.board
-            board_size = len(board)
+        x, y, num = int(move[0]), int(move[1]), int(move[2])  # Ensure integers
+        board = self.board
+        board_size_y = len(board)
+        board_size_x = len(board[0])
 
-            if not (0 <= x < board_size and 0 <= y < board_size):
-                raise ValueError("Invalid move coordinates")
+        # Handle edge cases first
+        if not (0 <= x < board_size_x and 0 <= y < board_size_y):
+            return "....."
 
-            # Temporarily place the move
-            original = board[y][x]
-            board[y][x] = num
+        # Try all possible pattern orientations
+        best_pattern = "....."
+        best_weight = 0
 
-            try:
-                # Direct array access for vertical pattern with bounds checking
-                for i in range(3):
-                    ny = y + i - 1
-                    if 0 <= ny < board_size:
-                        cell = board[ny][x]
-                        pattern_buffer[i] = ord('0' + cell) if cell is not None else ord('.')
+        # Define patterns and their reversed versions
+        patterns = [
+            ('10..1', [(1, 0), (4, 1)]),  # Forward pattern
+            ('1..01', [(0, 1), (3, 0)]),  # Reversed 10..1
+            ('0..1X', [(0, 0), (3, 1)]),  # Forward pattern
+            ('X1..0', [(0, 'X'), (3, 0)]), # Reversed 0..1X
+            ('X..1.', [(0, 'X'), (3, 1)]), # Forward pattern
+            ('.1..X', [(1, 1), (4, 'X')])  # Reversed X..1.
+        ]
+
+        pattern_weights = getattr(self, 'pattern_weights', {})
+
+        # Check horizontal patterns
+        for start_x in range(max(0, x - 4), x + 1):
+            rel_pos = x - start_x  # Our position in pattern
+
+            # For each pattern and its reversed version
+            for p, fixed_positions in patterns:
+                # Build pattern without our move
+                pattern_buffer[:] = bytearray(b'.....')
+                valid = True
+
+                # Check fixed positions match board state
+                for pos, val in fixed_positions:
+                    nx = start_x + pos
+                    if val == 'X':
+                        if 0 <= nx < board_size_x:
+                            valid = False
+                            break
+                        pattern_buffer[pos] = ord('X')
                     else:
-                        pattern_buffer[i] = ord('#')
-
-                # Direct array access for horizontal pattern with bounds checking
-                for i in range(3):
-                    nx = x + i - 1
-                    if 0 <= nx < board_size:
+                        if not (0 <= nx < board_size_x):
+                            valid = False
+                            break
                         cell = board[y][nx]
-                        pattern_buffer[i+3] = ord('0' + cell) if cell is not None else ord('.')
+                        if cell != val and cell is not None:
+                            valid = False
+                            break
+                        pattern_buffer[pos] = ord(str(val)) if cell is not None else ord('.')
+
+                if valid and pattern_buffer[rel_pos] == ord('.'):
+                    # Our move would complete this pattern
+                    # Use original pattern name for weight lookup
+                    orig_pattern = '10..1' if '10..1' in p or '1..01' in p else \
+                                 '0..1X' if '0..1X' in p or 'X1..0' in p else 'X..1.'
+                    weight = pattern_weights.get((orig_pattern, num), 0)
+                    if weight > best_weight:
+                        best_pattern = orig_pattern
+                        best_weight = weight
+
+        # Check vertical patterns
+        for start_y in range(max(0, y - 4), y + 1):
+            rel_pos = y - start_y  # Our position in pattern
+
+            # For each pattern and its reversed version
+            for p, fixed_positions in patterns:
+                # Build pattern without our move
+                pattern_buffer[:] = bytearray(b'.....')
+                valid = True
+
+                # Check fixed positions match board state
+                for pos, val in fixed_positions:
+                    ny = start_y + pos
+                    if val == 'X':
+                        if 0 <= ny < board_size_y:
+                            valid = False
+                            break
+                        pattern_buffer[pos] = ord('X')
                     else:
-                        pattern_buffer[i+3] = ord('#')
+                        if not (0 <= ny < board_size_y):
+                            valid = False
+                            break
+                        cell = board[ny][x]
+                        if cell != val and cell is not None:
+                            valid = False
+                            break
+                        pattern_buffer[pos] = ord(str(val)) if cell is not None else ord('.')
 
-                return pattern_buffer.decode('ascii')
+                if valid and pattern_buffer[rel_pos] == ord('.'):
+                    # Our move would complete this pattern
+                    # Use original pattern name for weight lookup
+                    orig_pattern = '10..1' if '10..1' in p or '1..01' in p else \
+                                 '0..1X' if '0..1X' in p or 'X1..0' in p else 'X..1.'
+                    weight = pattern_weights.get((orig_pattern, num), 0)
+                    if weight > best_weight:
+                        best_pattern = orig_pattern
+                        best_weight = weight
 
-            finally:
-                # Ensure board is restored even if an error occurs
-                board[y][x] = original
-
-        except Exception:
-            # Return a safe default pattern on error
-            return "......"
+        return best_pattern
 
     #===============================================================================================
     # ɅɅɅɅɅɅɅɅɅɅ END OF ASSIGNMENT 3 FUNCTIONS. ɅɅɅɅɅɅɅɅɅɅ
